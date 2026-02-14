@@ -9,7 +9,7 @@
 Kestrel is a system health monitoring and verification platform that continuously observes hardware-exposed system metrics, detects degraded behavior, and validates recovery through fault injection using an embedded-style architecture.
 
 <p align="center">
-  <img src="docs/images/menu-bar.png?v=2" alt="Kestrel menu bar" width="480">
+  <img src="docs/images/menu-bar-v2.png" alt="Kestrel menu bar" width="480">
 </p>
 
 ## Requirements

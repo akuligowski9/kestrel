@@ -83,7 +83,7 @@ All sensor values are normalized to a 0.0–1.0 scale before entering the engine
 
 A Swift-based menu bar application (`KestrelBar`) that launches the core as a subprocess and provides a live system health display.
 
-![Kestrel Menu Bar](images/menu-bar.png?v=2)
+![Kestrel Menu Bar](images/menu-bar-v2.png)
 
 Features:
 
