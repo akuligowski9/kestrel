@@ -508,14 +508,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         default: barColor = .systemGray
         }
 
+        let tabStop = NSTextTab(textAlignment: .left, location: 100)
+        let paragraphStyle = NSMutableParagraphStyle()
+        paragraphStyle.tabStops = [tabStop]
+
         let str = NSMutableAttributedString(
-            string: "\(dot)  ",
-            attributes: [.font: NSFont.systemFont(ofSize: 12, weight: .regular)]
+            string: "\(dot)  \(label)\t",
+            attributes: [
+                .font: NSFont.systemFont(ofSize: 12, weight: .regular),
+                .paragraphStyle: paragraphStyle,
+            ]
         )
-        str.append(NSAttributedString(
-            string: label.padding(toLength: 10, withPad: " ", startingAt: 0),
-            attributes: [.font: NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)]
-        ))
         str.append(NSAttributedString(
             string: miniBar,
             attributes: [
