@@ -10,15 +10,15 @@
     {
       "sensor_id": "battery",
       "type": "InvalidValue",
-      "trigger_after_s": 12,
-      "duration_s": 5,
+      "trigger_after_s": 10,
+      "duration_s": 10,
       "value": -1.0
     },
     {
       "sensor_id": "memory",
-      "type": "MissingUpdate",
-      "trigger_after_s": 20,
-      "suppress_cycles": 5
+      "type": "InterfaceFailure",
+      "trigger_after_s": 12,
+      "duration_s": 10
     }
   ]
 }

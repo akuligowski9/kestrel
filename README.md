@@ -2,7 +2,25 @@
 
 **A C++ embedded-style system monitor that watches system behavior and signals when conditions deviate from expected bounds.**
 
+<p align="center">
+  <img src="docs/images/app-icon.png" alt="Kestrel app icon" width="128">
+</p>
+
 Kestrel is a system health monitoring and verification platform that continuously observes hardware-exposed system metrics, detects degraded behavior, and validates recovery through fault injection using an embedded-style architecture.
+
+<p align="center">
+  <img src="docs/images/menu-bar.png" alt="Kestrel menu bar" width="480">
+</p>
+
+## Requirements
+
+- **macOS 14+** (Sonoma or later)
+- Apple Silicon or Intel Mac
+- Xcode Command Line Tools (`xcode-select --install`)
+- CMake 3.20+ and Ninja (`brew install cmake ninja`)
+- Swift 5.9+
+
+Kestrel's sensor layer uses macOS-specific APIs (Mach kernel statistics, `pmset`, `vm_statistics64`, `statfs`). The core engine architecture is platform-portable, and the sensor adapter interface is designed for future Linux support via `/proc` and `/sys`, but the current implementation runs on macOS only.
 
 ## Why "Kestrel"
 
@@ -37,20 +55,26 @@ Kestrel explores these concerns using a laptop environment while maintaining arc
               |
 [ C++ Kestrel Core Engine ]
               |
-[ Optional UI Layer (macOS Menu Bar) ]
+[ macOS Menu Bar UI (Swift) ]
 ```
 
 The system is composed of three layers:
 
-**Kestrel Core (C++)** -- All system logic: sensor polling, data normalization, rule evaluation, system state management, fault injection, and structured logging. Runs independently from any UI as a CLI application.
+**Kestrel Core (C++)** -- All system logic: sensor polling, data normalization, rule evaluation, system state management, fault injection, and structured JSONL logging. Runs independently from any UI as a CLI application.
 
 **OS Sensor Adapter Layer** -- Platform-specific hardware access isolated behind a provider interface, keeping system logic portable.
 
-**Optional macOS Status Bar UI** -- A lightweight Swift-based menu bar app that reads output from the core and displays current health state. Contains no system logic.
+**macOS Menu Bar UI (Swift)** -- A lightweight status bar app that launches the core as a subprocess, reads its JSONL output, and displays current health state with live progress bars, resolution history, and configurable sensitivity settings. Contains no system logic.
 
-## System States
+## System Health States
 
-Kestrel explicitly models system health using four states:
+| Level | Icon | Meaning |
+|---|---|---|
+| **Healthy** | Green | All sensors reporting within expected bounds |
+| **Warning** | Yellow `!` badge | One sensor outside expected bounds or unresponsive |
+| **Alert** | Red `x` badge | Multiple sensors outside expected bounds |
+
+Individual sensor states:
 
 | State | Meaning |
 |---|---|
@@ -58,6 +82,15 @@ Kestrel explicitly models system health using four states:
 | `DEGRADED` | Delayed, missing, or inconsistent input |
 | `FAILED` | Sensor unusable or invalid |
 | `UNKNOWN` | Insufficient data available |
+
+## Sensors
+
+| Sensor | Source | Poll Interval | Scale |
+|---|---|---|---|
+| CPU | Mach `host_statistics` | 1s | 0.0 – 1.0 |
+| Memory | `vm_statistics64` + `sysctl` | 2s | 0.0 – 1.0 |
+| Battery | `pmset` | 5s | 0.0 – 1.0 |
+| Storage | `statfs` | 10s | 0.0 – 1.0 |
 
 ## Core Components
 
@@ -67,55 +100,91 @@ Kestrel explicitly models system health using four states:
 | **SensorManager** | Schedule polling intervals, collect outputs, forward to engine |
 | **Engine** | Maintain measurement window, evaluate rules, determine health state |
 | **RuleEvaluator** | Threshold violations, missing data detection, rate-of-change checks |
-| **Logger** | Structured logging (JSONL), state transitions, fault events |
+| **FaultInjector** | Inject controlled faults between sensor and engine for verification |
+| **Logger** | Structured JSONL logging of readings, transitions, and fault events |
 
 ## Fault Injection
 
 Kestrel includes a fault injection system for controlled verification:
 
-- Invalid sensor values
-- Delayed readings
-- Missing sensor updates
-- Sudden value spikes
-- Simulated interface failure
+- **Spike** -- sudden value jump (one-shot)
+- **InvalidValue** -- inject value outside valid range
+- **MissingUpdate** -- suppress sensor output for N cycles
+- **DelayedReading** -- delay sensor response beyond expected interval
+- **InterfaceFailure** -- simulate complete sensor unavailability
 
-The system is expected to detect anomalies, transition to the appropriate degraded or failed state, log the event, and recover when conditions normalize.
-
-## Building
-
-Requirements: C++17 compiler (Clang), CMake 3.20+, Ninja
+Faults are loaded from JSON config files with timed triggers and optional auto-clear durations.
 
 ```bash
+./build/core/kestrel --fault configs/fault-basic.json
+```
+
+## Menu Bar Features
+
+- **Live sensor display** with color-coded progress bars
+- **Sensor detail submenus** with source, polling interval, and validity
+- **Resolution History** -- logs when sensors recover with duration and timestamp
+- **Settings** -- sensitivity presets (Relaxed / Normal / Strict) that adjust detection thresholds
+- **About** -- links to this repository
+
+## Install to Applications
+
+```bash
+./scripts/install.sh
+```
+
+This builds the C++ core and Swift menu bar app, packages them into `Kestrel.app`, and installs to `/Applications`. Launch from Spotlight, Launchpad, or:
+
+```bash
+open /Applications/Kestrel.app
+```
+
+## Building (Development)
+
+```bash
+brew install cmake ninja
 cmake -B build -G Ninja
 cmake --build build
 ```
 
-## Running
+## Running (CLI)
 
 ```bash
-./build/kestrel          # run with default sensor configuration
-./build/kestrel --fault   # run with fault injection enabled
+./build/core/kestrel                                    # default monitoring
+./build/core/kestrel --fault configs/fault-basic.json   # with fault injection
+./build/core/kestrel --threshold 0.85                   # strict sensitivity
 ```
 
 ## Testing
 
 ```bash
-cd build && ctest
+cd build && ctest --output-on-failure
 ```
+
+28 tests covering measurement window, rule evaluation, engine state machine, and fault injection with recovery.
 
 ## Project Structure
 
 ```
 kestrel/
   core/
-    sensors/       # sensor implementations and adapter interface
-    engine/        # central engine and state management
-    rules/         # rule evaluation logic
-    main.cpp       # entry point
-  macos-app/       # optional Swift menu bar UI
-  tests/           # unit and fault verification tests
-  docs/            # architecture and experiment documentation
-  configs/         # sensor and fault injection profiles
+    sensors/          # ISensor interface and macOS implementations
+    engine/           # Engine, state management, measurement window
+    rules/            # IRule interface and rule implementations
+    fault/            # FaultInjector, FaultProfile, config loading
+    logging/          # JSONL structured output
+    main.cpp          # CLI entry point
+  macos-app/          # Swift menu bar UI (SPM project)
+  tests/
+    unit/             # Unit tests for each component
+    fault/            # Fault injection verification tests
+  docs/
+    tech-spec.md      # Full technical specification
+    verification-log.md  # Sensor validation findings
+    images/           # Screenshots
+  configs/            # Sensor and fault injection profiles
+  scripts/
+    install.sh        # Build and install to /Applications
   CMakeLists.txt
 ```
 

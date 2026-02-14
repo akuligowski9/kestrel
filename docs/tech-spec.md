@@ -2,8 +2,8 @@
 
 **Embedded-Style System Health Monitoring & Verification Platform**
 
-Version: 1.0
-Status: Draft
+Version: 1.1
+Status: Implemented
 
 ---
 
@@ -11,7 +11,7 @@ Status: Draft
 
 Kestrel is a system health monitoring and verification platform designed to simulate embedded-system behavior using hardware interfaces available on a standard laptop.
 
-The system continuously collects measurements from operating system-exposed hardware interfaces (power, CPU load, memory, storage activity, network state), processes them in real time, and evaluates system behavior under both normal and degraded conditions.
+The system continuously collects measurements from operating system-exposed hardware interfaces (power, CPU load, memory, storage activity), processes them in real time, and evaluates system behavior under both normal and degraded conditions.
 
 The project emphasizes:
 
@@ -34,7 +34,7 @@ Kestrel is not intended to be a production monitoring tool. Its purpose is to mo
 [ C++ Kestrel Core Engine ]
               |
               v
-[ Optional UI Layer (macOS Menu Bar) ]
+[ macOS Menu Bar UI (Swift) ]
 ```
 
 ### 2.2 Kestrel Core (C++)
@@ -72,28 +72,44 @@ This provides:
 
 | Metric | Source |
 |---|---|
-| Battery / power status | `pmset`, IOKit |
-| CPU / memory statistics | `sysctl` |
+| Battery / power status | `pmset` |
+| CPU utilization | Mach `host_statistics` (`HOST_CPU_LOAD_INFO`) |
+| Memory pressure | `vm_statistics64` + `sysctl` (`hw.memsize`) |
 | Storage utilization | `statfs` |
-| Network interface state | System Configuration framework |
 
-Linux equivalents (`/proc`, `/sys`, `upower`) are documented for future portability but not implemented in the initial version.
+All sensor values are normalized to a 0.0–1.0 scale before entering the engine. Linux equivalents (`/proc`, `/sys`, `upower`) are documented for future portability but not implemented in the initial version.
 
-### 2.4 Optional macOS Status Bar Interface
+### 2.4 macOS Menu Bar Interface (Swift)
 
-A lightweight Swift-based menu bar application that:
+A Swift-based menu bar application (`KestrelBar`) that launches the core as a subprocess and provides a live system health display.
 
-- Displays current system health state
-- Provides quick metric visibility
-- Triggers system notifications on state changes
+![Kestrel Menu Bar](images/menu-bar.png)
 
-Constraints:
+Features:
 
+- Live sensor display with color-coded progress bars
+- Sensor detail submenus (source, polling interval, validity)
+- Three-tier aggregate health: **Healthy** (green), **Warning** (yellow `!` badge), **Alert** (red `x` badge)
+- Resolution History logging when sensors recover (stored in `~/Library/Application Support/Kestrel/resolutions.jsonl`)
+- Sensitivity presets (Relaxed 0.98 / Normal 0.95 / Strict 0.85) that restart the core with adjusted thresholds
+- About link to the project repository
+
+Communication:
+
+- Launches the C++ core binary as a child process
+- Reads JSONL from the core's stdout (flushed per line)
+- Parses `reading` and `transition` events to update UI state
 - Contains no system logic
-- Reads output from the Kestrel Core
-- Acts only as a visualization and notification mechanism
 
 This mirrors embedded devices where UI layers are separate from system behavior.
+
+### 2.5 Platform Requirements
+
+- **macOS 14+** (Sonoma or later) -- required for SF Symbols `bird` icon and Swift 5.9
+- Apple Silicon or Intel Mac
+- Xcode Command Line Tools, CMake 3.20+, Ninja
+
+The sensor adapter layer uses macOS-specific APIs. The core engine architecture is platform-portable, and the `ISensor` interface is designed for future Linux implementations via `/proc` and `/sys`.
 
 ## 3. System States
 
@@ -282,7 +298,33 @@ public:
 
 Faults are injected at the sensor adapter layer, between the real sensor and the engine, preserving the integrity of the core logic path.
 
-### 5.3 Expected Behavior Under Fault
+### 5.3 Config-Driven Fault Loading
+
+Faults are defined in JSON profile files and loaded at startup via the `--fault` flag. Each fault entry specifies a timed trigger and optional auto-clear duration:
+
+```json
+{
+  "faults": [
+    {
+      "sensor_id": "cpu_load",
+      "type": "Spike",
+      "trigger_after_s": 5,
+      "value": 0.99
+    },
+    {
+      "sensor_id": "battery",
+      "type": "InvalidValue",
+      "trigger_after_s": 12,
+      "duration_s": 5,
+      "value": -1.0
+    }
+  ]
+}
+```
+
+The `FaultProfile` class parses these configs using nlohmann/json and manages injection timing in the main loop. Faults with `duration_s` are automatically cleared after the specified interval, allowing the system to demonstrate the full detect-degrade-recover cycle.
+
+### 5.4 Expected Behavior Under Fault
 
 For each injected fault, the system must:
 
@@ -356,21 +398,45 @@ Verification is a core design goal, not an afterthought.
 - No file descriptor leaks
 - Log output remains well-formed over extended runs
 
-### 7.4 Tooling
+### 7.4 Test Suite
+
+28 tests implemented across unit and fault verification:
+
+- **Measurement Window** (5 tests) -- empty state, push/retrieve, ordering, bounded capacity, sensor isolation
+- **Rule Evaluation** (8 tests) -- threshold within/above/below/invalid, implausible ok/fail, rate of change stable/rapid/single reading
+- **Engine State Machine** (8 tests) -- initial unknown, valid→OK, out-of-bounds→DEGRADED, invalid→FAILED, recovery, aggregate worst-wins, transitions recorded
+- **Fault Injection** (7 tests) -- passthrough, invalid value, interface failure, spike one-shot, missing update cycles, clear, integration (fault→state transition→recovery)
+
+### 7.5 Tooling
 
 | Tool | Purpose |
 |---|---|
 | CMake + Ninja | Build system |
-| clang-tidy | Static analysis |
+| GoogleTest | Test framework (FetchContent) |
+| nlohmann/json | JSON parsing (FetchContent) |
 | AddressSanitizer | Memory error detection during development |
-| ThreadSanitizer | Data race detection (if multithreaded) |
 | ctest | Test runner |
 
 ## 8. Configuration
 
-Sensor and fault profiles are defined in JSON configuration files.
+Sensor and fault profiles are defined in JSON configuration files. Runtime behavior is controlled via CLI flags.
 
-### 8.1 Sensor Configuration
+### 8.1 CLI Flags
+
+```
+./kestrel                                    # default monitoring
+./kestrel --fault configs/fault-basic.json   # with fault injection
+./kestrel --threshold 0.85                   # strict sensitivity
+./kestrel --log /dev/null                    # suppress file logging
+```
+
+| Flag | Description | Default |
+|---|---|---|
+| `--fault <path>` | Load fault injection profile from JSON | None |
+| `--threshold <value>` | Set detection threshold for ThresholdRule (0.0–1.0) | 0.95 |
+| `--log <path>` | JSONL log output path | `kestrel.jsonl` |
+
+### 8.2 Sensor Configuration
 
 ```json
 {
@@ -385,13 +451,15 @@ Sensor and fault profiles are defined in JSON configuration files.
       "id": "battery",
       "type": "BatterySensor",
       "poll_interval_ms": 5000,
-      "bounds": { "min": 0.0, "max": 100.0 }
+      "bounds": { "min": 0.0, "max": 1.0 }
     }
   ]
 }
 ```
 
-### 8.2 Fault Profile
+All sensor values are normalized to 0.0–1.0 before entering the engine.
+
+### 8.3 Fault Profile
 
 ```json
 {
@@ -399,13 +467,28 @@ Sensor and fault profiles are defined in JSON configuration files.
     {
       "sensor_id": "cpu_load",
       "type": "Spike",
-      "trigger_after_s": 10,
-      "duration_s": 5,
+      "trigger_after_s": 5,
       "value": 0.99
+    },
+    {
+      "sensor_id": "battery",
+      "type": "InvalidValue",
+      "trigger_after_s": 12,
+      "duration_s": 5,
+      "value": -1.0
+    },
+    {
+      "sensor_id": "memory",
+      "type": "MissingUpdate",
+      "trigger_after_s": 20,
+      "duration_s": 5,
+      "params": { "cycles": 3 }
     }
   ]
 }
 ```
+
+Faults without `duration_s` are one-shot (e.g., Spike). Faults with `duration_s` are automatically cleared after the specified interval.
 
 ## 9. Assumptions
 
@@ -420,41 +503,44 @@ Sensor and fault profiles are defined in JSON configuration files.
 ```
 kestrel/
   core/
-    sensors/          # ISensor interface and platform implementations
+    sensors/          # ISensor interface and macOS implementations
     engine/           # Engine, state management, measurement window
     rules/            # IRule interface and rule implementations
-    fault/            # FaultInjector and fault type definitions
-    logging/          # Logger and JSONL output
+    fault/            # FaultInjector, FaultProfile, config loading
+    logging/          # JSONL structured output
     main.cpp          # CLI entry point
-  macos-app/          # Optional Swift menu bar UI
+  macos-app/          # Swift menu bar UI (SPM project)
   tests/
     unit/             # Unit tests for each component
     fault/            # Fault injection verification tests
-    stability/        # Long-running stability tests
   docs/
     tech-spec.md      # This document
-    architecture.md   # Diagrams and design notes
-    experiments.md    # Experiment procedures and results
+    verification-log.md  # Sensor validation findings
+    images/           # Screenshots
   configs/
     default.json      # Default sensor configuration
     fault-basic.json  # Basic fault injection profile
+    fault-alert.json  # Multi-sensor fault profile for Alert testing
+  scripts/
+    install.sh        # Build and install to /Applications
+    generate-icon.swift  # App icon generation
   CMakeLists.txt
 ```
 
 ## 11. Non-Goals
 
 - Production monitoring or alerting
-- Cross-platform support in initial version (macOS only)
+- Cross-platform support in initial version (macOS 14+ only)
 - Real-time guarantees (best-effort timing in user-space)
 - Network-based monitoring or remote telemetry
-- GUI beyond the optional menu bar status display
+- GUI beyond the menu bar status display
 
 ## 12. Future Considerations
 
-These are documented for context but explicitly out of scope for the initial build:
+These are documented for context but explicitly out of scope for the current build:
 
-- Linux sensor provider implementation
+- Linux sensor provider implementation (`/proc`, `/sys`, `upower`)
 - Remote log streaming
 - Configuration hot-reload
-- Additional sensor types (GPU, Bluetooth, external USB devices)
+- Additional sensor types (GPU, thermal via IOKit, network interfaces)
 - Experiment automation and comparison tooling

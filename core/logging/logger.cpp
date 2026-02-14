@@ -62,7 +62,7 @@ void Logger::write_line(const std::string& json) {
         file_ << json << "\n";
         file_.flush();
     }
-    std::cout << json << "\n";
+    std::cout << json << std::endl;
 }
 
 std::string Logger::timestamp_iso8601() const {

@@ -11,10 +11,12 @@ add_library(kestrel_core
     rules/implausible_value_rule.cpp
     rules/rate_of_change_rule.cpp
     fault/fault_injector.cpp
+    fault/fault_profile.cpp
     logging/logger.cpp
 )
 
 target_include_directories(kestrel_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(kestrel_core PUBLIC nlohmann_json::nlohmann_json)
 
 add_executable(kestrel main.cpp)
 target_link_libraries(kestrel PRIVATE kestrel_core)
