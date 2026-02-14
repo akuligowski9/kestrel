@@ -4,6 +4,7 @@
 #include <ctime>
 #include <iomanip>
 #include <iostream>
+#include <nlohmann/json.hpp>
 #include <sstream>
 
 namespace kestrel {
@@ -21,39 +22,46 @@ Logger::~Logger() {
 }
 
 void Logger::log_reading(const SensorReading& reading) {
-    std::string line = R"({"ts":")" + timestamp_iso8601() +
-                       R"(","type":"reading","sensor":")" + reading.sensor_id +
-                       R"(","value":)" + std::to_string(reading.value) +
-                       R"(,"valid":)" + (reading.valid ? "true" : "false") + "}";
-    write_line(line);
+    nlohmann::json j;
+    j["ts"] = timestamp_iso8601();
+    j["type"] = "reading";
+    j["sensor"] = reading.sensor_id;
+    j["value"] = reading.value;
+    j["valid"] = reading.valid;
+    write_line(j.dump());
 }
 
 void Logger::log_transition(const StateTransition& transition) {
-    std::string line = R"({"ts":")" + timestamp_iso8601() +
-                       R"(","type":"transition","sensor":")" + transition.sensor_id +
-                       R"(","from":")" + to_string(transition.from) +
-                       R"(","to":")" + to_string(transition.to) +
-                       R"(","reason":")" + transition.reason + R"("})";
-    write_line(line);
+    nlohmann::json j;
+    j["ts"] = timestamp_iso8601();
+    j["type"] = "transition";
+    j["sensor"] = transition.sensor_id;
+    j["from"] = to_string(transition.from);
+    j["to"] = to_string(transition.to);
+    j["reason"] = transition.reason;
+    write_line(j.dump());
 }
 
 void Logger::log_fault(const std::string& sensor_id,
                        const std::string& fault_type,
                        double injected_value) {
-    std::string line = R"({"ts":")" + timestamp_iso8601() +
-                       R"(","type":"fault","sensor":")" + sensor_id +
-                       R"(","fault_type":")" + fault_type +
-                       R"(","injected_value":)" +
-                       std::to_string(injected_value) + "}";
-    write_line(line);
+    nlohmann::json j;
+    j["ts"] = timestamp_iso8601();
+    j["type"] = "fault";
+    j["sensor"] = sensor_id;
+    j["fault_type"] = fault_type;
+    j["injected_value"] = injected_value;
+    write_line(j.dump());
 }
 
 void Logger::log_rule_violation(const RuleResult& result) {
-    std::string line = R"({"ts":")" + timestamp_iso8601() +
-                       R"(","type":"rule_violation","rule":")" + result.rule_name +
-                       R"(","sensor":")" + result.sensor_id +
-                       R"(","message":")" + result.message + R"("})";
-    write_line(line);
+    nlohmann::json j;
+    j["ts"] = timestamp_iso8601();
+    j["type"] = "rule_violation";
+    j["rule"] = result.rule_name;
+    j["sensor"] = result.sensor_id;
+    j["message"] = result.message;
+    write_line(j.dump());
 }
 
 void Logger::write_line(const std::string& json) {

@@ -85,12 +85,14 @@ Individual sensor states:
 
 ## Sensors
 
-| Sensor | Source | Poll Interval | Scale |
-|---|---|---|---|
-| CPU | Mach `host_statistics` | 1s | 0.0 – 1.0 |
-| Memory | `vm_statistics64` + `sysctl` | 2s | 0.0 – 1.0 |
-| Battery | `pmset` | 5s | 0.0 – 1.0 |
-| Storage | `statfs` | 10s | 0.0 – 1.0 |
+| Sensor | Source | Poll Interval | Scale | Threshold Direction |
+|---|---|---|---|---|
+| CPU | Mach `host_statistics` | 1s | 0.0 – 1.0 | High usage = bad |
+| Memory | `vm_statistics64` + `sysctl` | 2s | 0.0 – 1.0 | High usage = bad |
+| Battery | `pmset` | 5s | 0.0 – 1.0 | Low charge = bad |
+| Storage | `statfs` | 10s | 0.0 – 1.0 | High usage = bad |
+
+Thresholds are per-sensor. CPU, memory, and storage alert when values exceed the configured threshold (e.g., above 95%). Battery uses an inverted threshold, alerting when charge drops below a minimum (e.g., below 5% at Normal sensitivity).
 
 ## Core Components
 
@@ -121,10 +123,14 @@ Faults are loaded from JSON config files with timed triggers and optional auto-c
 
 ## Menu Bar Features
 
-- **Live sensor display** with color-coded progress bars
-- **Sensor detail submenus** with source, polling interval, and validity
-- **Resolution History** -- logs when sensors recover with duration and timestamp
-- **Settings** -- sensitivity presets (Relaxed / Normal / Strict) that adjust detection thresholds
+- **Live sensor display** with color-coded progress bars and state indicators
+- **Sensor detail submenus** with diagnostic information:
+  - **Why?** -- plain-language explanation of why the sensor is in its current state, varying by value range and sensor type
+  - **Check** -- specific troubleshooting steps (which app to open, which tab to check, what to look for)
+  - **Quick actions** -- clickable shortcuts to open Activity Monitor, Battery Settings, or Storage Settings directly
+- **Sensor toggles** -- enable or disable individual sensors from Settings
+- **Resolution History** -- logs when sensors recover, with duration and timestamp (stored in `~/Library/Application Support/Kestrel/resolutions.jsonl`)
+- **Sensitivity presets** -- Relaxed (0.98) / Normal (0.95) / Strict (0.85) that restart the core with adjusted thresholds
 - **About** -- links to this repository
 
 ## Install to Applications
@@ -161,7 +167,7 @@ cmake --build build
 cd build && ctest --output-on-failure
 ```
 
-28 tests covering measurement window, rule evaluation, engine state machine, and fault injection with recovery.
+35 tests covering measurement window, rule evaluation (including per-sensor threshold targeting and battery inversion), missing data detection, engine state machine, and fault injection with recovery.
 
 ## Project Structure
 

@@ -1,5 +1,6 @@
 #include "engine/measurement_window.h"
 #include "rules/implausible_value_rule.h"
+#include "rules/missing_data_rule.h"
 #include "rules/rate_of_change_rule.h"
 #include "rules/threshold_rule.h"
 
@@ -106,4 +107,104 @@ TEST(RateOfChangeRule, SingleReadingIsOK) {
     RateOfChangeRule rule(1.0);
     auto result = rule.evaluate(window, "s");
     EXPECT_EQ(result.severity, RuleSeverity::OK);
+}
+
+// --- ThresholdRule: Per-Sensor Targeting ---
+
+TEST(ThresholdRule, TargetSensorAppliesOnlyToTarget) {
+    MeasurementWindow window(8);
+    window.push(make_reading("cpu_load", 0.99));
+    window.push(make_reading("battery", 0.99));
+
+    // Rule targets only cpu_load
+    ThresholdRule rule(0.0, 0.95, RuleSeverity::DEGRADED, "cpu_load");
+
+    auto cpu_result = rule.evaluate(window, "cpu_load");
+    EXPECT_EQ(cpu_result.severity, RuleSeverity::DEGRADED);
+
+    auto battery_result = rule.evaluate(window, "battery");
+    EXPECT_EQ(battery_result.severity, RuleSeverity::OK); // skipped
+}
+
+TEST(ThresholdRule, BatteryInvertedThreshold) {
+    MeasurementWindow window(8);
+
+    // Battery at 100% — should be OK with inverted bounds [0.05, 1.0]
+    window.push(make_reading("battery", 1.0));
+    ThresholdRule rule(0.05, 1.0, RuleSeverity::DEGRADED, "battery");
+    auto result = rule.evaluate(window, "battery");
+    EXPECT_EQ(result.severity, RuleSeverity::OK);
+}
+
+TEST(ThresholdRule, BatteryLowTriggersDegraded) {
+    MeasurementWindow window(8);
+
+    // Battery at 2% — should be DEGRADED with inverted bounds [0.05, 1.0]
+    window.push(make_reading("battery", 0.02));
+    ThresholdRule rule(0.05, 1.0, RuleSeverity::DEGRADED, "battery");
+    auto result = rule.evaluate(window, "battery");
+    EXPECT_EQ(result.severity, RuleSeverity::DEGRADED);
+}
+
+// --- MissingDataRule ---
+
+TEST(MissingDataRule, RecentReadingIsOK) {
+    MeasurementWindow window(8);
+    window.push(make_reading("s", 0.5));
+
+    MissingDataRule rule(
+        std::chrono::milliseconds(5000),
+        std::chrono::milliseconds(15000)
+    );
+    auto result = rule.evaluate(window, "s");
+    EXPECT_EQ(result.severity, RuleSeverity::OK);
+}
+
+TEST(MissingDataRule, StaleReadingIsDegraded) {
+    MeasurementWindow window(8);
+
+    // Push a reading with a timestamp in the past
+    SensorReading r;
+    r.sensor_id = "s";
+    r.value = 0.5;
+    r.valid = true;
+    r.timestamp = std::chrono::steady_clock::now() - std::chrono::milliseconds(6000);
+    window.push(r);
+
+    MissingDataRule rule(
+        std::chrono::milliseconds(5000),
+        std::chrono::milliseconds(15000)
+    );
+    auto result = rule.evaluate(window, "s");
+    EXPECT_EQ(result.severity, RuleSeverity::DEGRADED);
+}
+
+TEST(MissingDataRule, VeryStaleReadingIsFailed) {
+    MeasurementWindow window(8);
+
+    SensorReading r;
+    r.sensor_id = "s";
+    r.value = 0.5;
+    r.valid = true;
+    r.timestamp = std::chrono::steady_clock::now() - std::chrono::milliseconds(20000);
+    window.push(r);
+
+    MissingDataRule rule(
+        std::chrono::milliseconds(5000),
+        std::chrono::milliseconds(15000)
+    );
+    auto result = rule.evaluate(window, "s");
+    EXPECT_EQ(result.severity, RuleSeverity::FAILED);
+}
+
+TEST(MissingDataRule, InvalidReadingIsFailed) {
+    MeasurementWindow window(8);
+    window.push(make_reading("s", 0.5, false));
+
+    MissingDataRule rule(
+        std::chrono::milliseconds(5000),
+        std::chrono::milliseconds(15000)
+    );
+    auto result = rule.evaluate(window, "s");
+    EXPECT_EQ(result.severity, RuleSeverity::FAILED);
 }

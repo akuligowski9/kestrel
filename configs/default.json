@@ -4,29 +4,25 @@
       "id": "cpu_load",
       "type": "CpuLoadSensor",
       "poll_interval_ms": 1000,
-      "bounds": { "min": 0.0, "max": 1.0 },
-      "absolute_bounds": { "min": -1.0, "max": 2.0 }
+      "bounds": { "min": 0.0, "max": 1.0 }
     },
     {
       "id": "memory",
       "type": "MemorySensor",
       "poll_interval_ms": 2000,
-      "bounds": { "min": 0.0, "max": 1.0 },
-      "absolute_bounds": { "min": -1.0, "max": 2.0 }
+      "bounds": { "min": 0.0, "max": 1.0 }
     },
     {
       "id": "battery",
       "type": "BatterySensor",
       "poll_interval_ms": 5000,
-      "bounds": { "min": 0.0, "max": 1.0 },
-      "absolute_bounds": { "min": -1.0, "max": 2.0 }
+      "bounds": { "min": 0.0, "max": 1.0 }
     },
     {
       "id": "storage",
       "type": "StorageSensor",
       "poll_interval_ms": 10000,
-      "bounds": { "min": 0.0, "max": 1.0 },
-      "absolute_bounds": { "min": -1.0, "max": 2.0 }
+      "bounds": { "min": 0.0, "max": 1.0 }
     }
   ],
   "rules": {

@@ -4,3 +4,10 @@ build/
 .DS_Store
 .cache/
 compile_commands.json
+
+# Editors
+*.swp
+*.swo
+*~
+.vscode/
+.idea/

@@ -88,8 +88,12 @@ A Swift-based menu bar application (`KestrelBar`) that launches the core as a su
 Features:
 
 - Live sensor display with color-coded progress bars
-- Sensor detail submenus (source, polling interval, validity)
+- Sensor detail submenus with diagnostic information:
+  - **Why?** -- plain-language explanation of the sensor's current state (varies by value range and sensor type)
+  - **Check** -- specific troubleshooting steps (which app to open, which tab, what to look for)
+  - **Quick actions** -- clickable shortcuts to Activity Monitor, Battery Settings, or Storage Settings
 - Three-tier aggregate health: **Healthy** (green), **Warning** (yellow `!` badge), **Alert** (red `x` badge)
+- Sensor toggles to enable/disable individual sensors from Settings
 - Resolution History logging when sensors recover (stored in `~/Library/Application Support/Kestrel/resolutions.jsonl`)
 - Sensitivity presets (Relaxed 0.98 / Normal 0.95 / Strict 0.85) that restart the core with adjusted thresholds
 - About link to the project repository
@@ -239,12 +243,21 @@ Rule types:
 
 | Rule | Description |
 |---|---|
-| `ThresholdRule` | Value exceeds configured upper/lower bound |
+| `ThresholdRule` | Value exceeds configured upper/lower bound. Supports per-sensor targeting via optional `target_sensor` parameter. |
 | `MissingDataRule` | No reading received within expected interval |
 | `ImplausibleValueRule` | Value outside physically possible range |
 | `RateOfChangeRule` | Value changes faster than expected rate |
 
 Rules are explicit, stateless, and independently testable.
+
+#### Per-Sensor Thresholds
+
+The `ThresholdRule` accepts an optional `target_sensor` parameter. When set, the rule only applies to that sensor and returns OK for all others. This allows different threshold ranges per sensor:
+
+- **CPU, Memory, Storage**: `ThresholdRule(0.0, threshold)` — high values indicate resource pressure
+- **Battery**: `ThresholdRule(1.0 - threshold, 1.0)` — inverted bounds, low charge is the concern
+
+At Normal sensitivity (0.95), CPU/memory/storage alert above 95%, while battery alerts below 5%.
 
 ### 4.5 Logger
 
@@ -400,10 +413,10 @@ Verification is a core design goal, not an afterthought.
 
 ### 7.4 Test Suite
 
-28 tests implemented across unit and fault verification:
+35 tests implemented across unit and fault verification:
 
 - **Measurement Window** (5 tests) -- empty state, push/retrieve, ordering, bounded capacity, sensor isolation
-- **Rule Evaluation** (8 tests) -- threshold within/above/below/invalid, implausible ok/fail, rate of change stable/rapid/single reading
+- **Rule Evaluation** (15 tests) -- threshold within/above/below/invalid, per-sensor targeting (applies only to target, skips others), battery inverted threshold (full charge OK, low charge DEGRADED), implausible ok/fail, rate of change stable/rapid/single reading, missing data recent/stale/very stale/invalid
 - **Engine State Machine** (8 tests) -- initial unknown, valid→OK, out-of-bounds→DEGRADED, invalid→FAILED, recovery, aggregate worst-wins, transitions recorded
 - **Fault Injection** (7 tests) -- passthrough, invalid value, interface failure, spike one-shot, missing update cycles, clear, integration (fault→state transition→recovery)
 
@@ -481,8 +494,7 @@ All sensor values are normalized to 0.0–1.0 before entering the engine.
       "sensor_id": "memory",
       "type": "MissingUpdate",
       "trigger_after_s": 20,
-      "duration_s": 5,
-      "params": { "cycles": 3 }
+      "suppress_cycles": 5
     }
   ]
 }
