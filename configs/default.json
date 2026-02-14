@@ -18,8 +18,8 @@
       "id": "battery",
       "type": "BatterySensor",
       "poll_interval_ms": 5000,
-      "bounds": { "min": 0.0, "max": 100.0 },
-      "absolute_bounds": { "min": -1.0, "max": 200.0 }
+      "bounds": { "min": 0.0, "max": 1.0 },
+      "absolute_bounds": { "min": -1.0, "max": 2.0 }
     },
     {
       "id": "storage",
