@@ -1,0 +1,24 @@
+{
+  "faults": [
+    {
+      "sensor_id": "cpu_load",
+      "type": "Spike",
+      "trigger_after_s": 10,
+      "duration_s": 0,
+      "value": 0.99
+    },
+    {
+      "sensor_id": "battery",
+      "type": "InvalidValue",
+      "trigger_after_s": 20,
+      "duration_s": 5,
+      "value": -1.0
+    },
+    {
+      "sensor_id": "memory",
+      "type": "MissingUpdate",
+      "trigger_after_s": 30,
+      "suppress_cycles": 5
+    }
+  ]
+}
