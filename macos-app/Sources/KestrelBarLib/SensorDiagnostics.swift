@@ -2,11 +2,11 @@ import Foundation
 
 /// Pure diagnostic functions for generating human-readable sensor explanations.
 /// Stateless and independently testable — no dependency on UI or AppDelegate.
-enum SensorDiagnostics {
+public enum SensorDiagnostics {
 
     // MARK: - Why?
 
-    static func diagnosis(sensor: String, state: String, value: Double, valid: Bool, pct: Int, threshold: Double) -> String {
+    public static func diagnosis(sensor: String, state: String, value: Double, valid: Bool, pct: Int, threshold: Double) -> String {
         if state == "UNKNOWN" {
             return "Waiting for the first reading from this sensor."
         }
@@ -33,7 +33,7 @@ enum SensorDiagnostics {
 
     // MARK: - Check
 
-    static func troubleshootTip(sensor: String, state: String) -> String {
+    public static func troubleshootTip(sensor: String, state: String) -> String {
         switch sensor {
         case "cpu_load":
             return state == "OK"
@@ -58,12 +58,17 @@ enum SensorDiagnostics {
 
     // MARK: - Actions
 
-    struct Action {
-        let id: String
-        let title: String
+    public struct Action {
+        public let id: String
+        public let title: String
+
+        public init(id: String, title: String) {
+            self.id = id
+            self.title = title
+        }
     }
 
-    static func actions(sensor: String) -> [Action] {
+    public static func actions(sensor: String) -> [Action] {
         switch sensor {
         case "cpu_load":  return [Action(id: "open_activity_monitor", title: "Open Activity Monitor")]
         case "memory":    return [Action(id: "open_activity_monitor", title: "Open Activity Monitor")]

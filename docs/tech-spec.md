@@ -88,11 +88,13 @@ A Swift-based menu bar application (`KestrelBar`) that launches the core as a su
 Features:
 
 - Live sensor display with color-coded progress bars
+- Incremental menu updates — sensor data updates menu items in-place without full teardown/rebuild, eliminating flicker
 - Sensor detail submenus with diagnostic information:
   - **Why?** -- plain-language explanation of the sensor's current state (varies by value range and sensor type)
   - **Check** -- specific troubleshooting steps (which app to open, which tab, what to look for)
   - **Quick actions** -- clickable shortcuts to Activity Monitor, Battery Settings, or Storage Settings
 - Three-tier aggregate health: **Healthy** (green), **Warning** (yellow `!` badge), **Alert** (red `x` badge)
+- Core process watchdog — monitors subprocess health via `isRunning` and data staleness (15s timeout), auto-restarts with exponential backoff (1s, 2s, 4s... capped at 30s, max 5 attempts)
 - Sensor toggles to enable/disable individual sensors from Settings
 - Resolution History logging when sensors recover (stored in `~/Library/Application Support/Kestrel/resolutions.jsonl`)
 - Sensitivity presets (Relaxed 0.98 / Normal 0.95 / Strict 0.85) that restart the core with adjusted thresholds
@@ -243,7 +245,7 @@ Rule types:
 
 | Rule | Description |
 |---|---|
-| `ThresholdRule` | Value exceeds configured upper/lower bound. Supports per-sensor targeting via optional `target_sensor` parameter. |
+| `ThresholdRule` | Value exceeds configured upper/lower bound. Supports per-sensor bounds map or single-sensor targeting. |
 | `MissingDataRule` | No reading received within expected interval |
 | `ImplausibleValueRule` | Value outside physically possible range |
 | `RateOfChangeRule` | Value changes faster than expected rate |
@@ -252,10 +254,15 @@ Rules are explicit, stateless, and independently testable.
 
 #### Per-Sensor Thresholds
 
-The `ThresholdRule` accepts an optional `target_sensor` parameter. When set, the rule only applies to that sensor and returns OK for all others. This allows different threshold ranges per sensor:
+The `ThresholdRule` supports two construction modes:
 
-- **CPU, Memory, Storage**: `ThresholdRule(0.0, threshold)` — high values indicate resource pressure
-- **Battery**: `ThresholdRule(1.0 - threshold, 1.0)` — inverted bounds, low charge is the concern
+1. **Bounds map** (preferred) — a single rule with an `unordered_map<string, ThresholdBounds>` defining per-sensor ranges and severities. Sensors not in the map return OK.
+2. **Legacy single-sensor** — `target_sensor` parameter targets one sensor; global mode applies to all.
+
+This allows different threshold ranges per sensor:
+
+- **CPU, Memory, Storage**: `{0.0, threshold}` — high values indicate resource pressure
+- **Battery**: `{1.0 - threshold, 1.0}` — inverted bounds, low charge is the concern
 
 At Normal sensitivity (0.95), CPU/memory/storage alert above 95%, while battery alerts below 5%.
 
@@ -413,19 +420,26 @@ Verification is a core design goal, not an afterthought.
 
 ### 7.4 Test Suite
 
-35 tests implemented across unit and fault verification:
+76 tests implemented across C++ and Swift:
+
+**C++ (40 tests):**
 
 - **Measurement Window** (5 tests) -- empty state, push/retrieve, ordering, bounded capacity, sensor isolation
-- **Rule Evaluation** (15 tests) -- threshold within/above/below/invalid, per-sensor targeting (applies only to target, skips others), battery inverted threshold (full charge OK, low charge DEGRADED), implausible ok/fail, rate of change stable/rapid/single reading, missing data recent/stale/very stale/invalid
+- **Rule Evaluation** (20 tests) -- threshold within/above/below/invalid, per-sensor targeting (applies only to target, skips others), battery inverted threshold (full charge OK, low charge DEGRADED), bounds map (multiple sensors, unknown sensor OK, invalid reading, empty map, per-sensor severity), implausible ok/fail, rate of change stable/rapid/single reading, missing data recent/stale/very stale/invalid
 - **Engine State Machine** (8 tests) -- initial unknown, valid→OK, out-of-bounds→DEGRADED, invalid→FAILED, recovery, aggregate worst-wins, transitions recorded
 - **Fault Injection** (7 tests) -- passthrough, invalid value, interface failure, spike one-shot, missing update cycles, clear, integration (fault→state transition→recovery)
+
+**Swift (36 tests):**
+
+- **SensorDiagnostics** (36 tests) -- diagnosis messages for all sensors/states/boundary values, troubleshooting tips for all sensors in OK and degraded states, action mappings for all sensors
 
 ### 7.5 Tooling
 
 | Tool | Purpose |
 |---|---|
 | CMake + Ninja | Build system |
-| GoogleTest | Test framework (FetchContent) |
+| GoogleTest | C++ test framework (FetchContent) |
+| Swift Testing | Swift test framework |
 | nlohmann/json | JSON parsing (FetchContent) |
 | AddressSanitizer | Memory error detection during development |
 | ctest | Test runner |
@@ -522,6 +536,11 @@ kestrel/
     logging/          # JSONL structured output
     main.cpp          # CLI entry point
   macos-app/          # Swift menu bar UI (SPM project)
+    Sources/
+      KestrelBarLib/  # Testable library (SensorDiagnostics)
+      KestrelBar/     # Menu bar app (AppDelegate, CoreProcess, etc.)
+    Tests/
+      KestrelBarLibTests/  # Swift tests for SensorDiagnostics
   tests/
     unit/             # Unit tests for each component
     fault/            # Fault injection verification tests

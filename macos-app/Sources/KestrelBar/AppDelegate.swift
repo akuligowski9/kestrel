@@ -1,4 +1,5 @@
 import AppKit
+import KestrelBarLib
 
 class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
@@ -17,6 +18,20 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // Settings
     private var currentSensitivity: String = "Normal"
     private var disabledSensors: Set<String> = []
+
+    // Incremental menu refs
+    private var aggregateHeaderItem: NSMenuItem?
+    private var severityDescItem: NSMenuItem?
+    private var sensorRowItems: [String: NSMenuItem] = [:]
+
+    // Watchdog
+    private var watchdogTimer: Timer?
+    private var lastDataTimestamp: Date = Date()
+    private var restartAttempts: Int = 0
+    private let maxRestartAttempts: Int = 5
+    private let watchdogInterval: TimeInterval = 5.0
+    private let staleDataTimeout: TimeInterval = 15.0
+    private var backoffDelay: TimeInterval = 1.0
 
     struct SensorDisplayState {
         var value: Double = 0.0
@@ -45,6 +60,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        stopWatchdog()
         coreProcess?.stop()
     }
 
@@ -52,6 +68,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func buildMenu() {
         let menu = NSMenu()
+
+        // Clear incremental refs
+        sensorRowItems = [:]
 
         // --- Aggregate status ---
         let dot = statusDot(for: aggregateLabel)
@@ -62,6 +81,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         )
         stateItem.isEnabled = false
         menu.addItem(stateItem)
+        self.aggregateHeaderItem = stateItem
 
         // Severity explanation
         let severityDesc: String
@@ -89,6 +109,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         )
         descItem.isEnabled = false
         menu.addItem(descItem)
+        self.severityDescItem = descItem
 
         menu.addItem(NSMenuItem.separator())
 
@@ -127,6 +148,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             item.submenu = sub
 
             menu.addItem(item)
+            sensorRowItems[sensor] = item
         }
 
         menu.addItem(NSMenuItem.separator())
@@ -284,6 +306,66 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem.menu = menu
     }
 
+    private func updateMenuInPlace() {
+        guard let headerItem = aggregateHeaderItem,
+              let descItem = severityDescItem else {
+            buildMenu()
+            return
+        }
+
+        // Update aggregate header
+        let dot = statusDot(for: aggregateLabel)
+        headerItem.attributedTitle = styledTitle(
+            "\(dot)  System: \(aggregateLabel)",
+            size: 13, weight: .semibold
+        )
+
+        // Update severity description
+        let severityDesc: String
+        if let error = coreError {
+            severityDesc = error
+        } else {
+            switch aggregateLabel {
+            case "Healthy":
+                severityDesc = "All sensors reporting within expected bounds."
+            case "Warning":
+                severityDesc = "One sensor is outside expected bounds or unresponsive."
+            case "Alert":
+                severityDesc = "Multiple sensors are outside expected bounds."
+            default:
+                severityDesc = "Waiting for sensor data..."
+            }
+        }
+        descItem.attributedTitle = NSAttributedString(
+            string: "     \(severityDesc)",
+            attributes: [
+                .font: NSFont.systemFont(ofSize: 11, weight: .regular),
+                .foregroundColor: NSColor.secondaryLabelColor,
+            ]
+        )
+
+        // Update each sensor row in place
+        for sensor in sensorOrder {
+            guard let item = sensorRowItems[sensor],
+                  let info = sensorInfo[sensor] else { continue }
+
+            let display = sensorStates[sensor]
+            let value = display?.value ?? 0.0
+            let state = display?.state ?? "—"
+            let sensorDot = statusDot(for: state)
+            let pct = Int(value * 100)
+
+            item.attributedTitle = sensorRowTitle(
+                dot: sensorDot, label: info.label, pct: pct, state: state
+            )
+
+            // Rebuild submenu
+            let sub = NSMenu()
+            addSensorDetail(to: sub, sensor: sensor, display: display, info: info)
+            item.submenu = sub
+        }
+    }
+
     // MARK: - Sensor Submenu
 
     private func addSensorDetail(to menu: NSMenu, sensor: String, display: SensorDisplayState?, info: (label: String, source: String, poll: String, unit: String)) {
@@ -427,9 +509,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         let str = NSMutableAttributedString(
-            string: "\(dot)  \(label.padding(toLength: 10, withPad: " ", startingAt: 0))",
+            string: "\(dot)  ",
             attributes: [.font: NSFont.systemFont(ofSize: 12, weight: .regular)]
         )
+        str.append(NSAttributedString(
+            string: label.padding(toLength: 10, withPad: " ", startingAt: 0),
+            attributes: [.font: NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)]
+        ))
         str.append(NSAttributedString(
             string: miniBar,
             attributes: [
@@ -576,14 +662,75 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             self?.handleLine(line)
         }
         coreProcess?.start()
+        startWatchdog()
     }
 
     private func restartCore() {
+        stopWatchdog()
         coreProcess?.stop()
         sensorStates = [:]
         degradedSince = [:]
         aggregateLabel = "UNKNOWN"
+        lastDataTimestamp = Date()
         startCore()
+    }
+
+    // MARK: - Watchdog
+
+    private func startWatchdog() {
+        stopWatchdog()
+        watchdogTimer = Timer.scheduledTimer(withTimeInterval: watchdogInterval, repeats: true) { [weak self] _ in
+            self?.checkCoreHealth()
+        }
+    }
+
+    private func stopWatchdog() {
+        watchdogTimer?.invalidate()
+        watchdogTimer = nil
+    }
+
+    private func checkCoreHealth() {
+        if let core = coreProcess, !core.isRunning {
+            handleCoreFailure(reason: "Core process exited unexpectedly")
+            return
+        }
+
+        let staleness = Date().timeIntervalSince(lastDataTimestamp)
+        if staleness > staleDataTimeout {
+            handleCoreFailure(reason: "No data received for \(Int(staleness))s")
+        }
+    }
+
+    private func handleCoreFailure(reason: String) {
+        stopWatchdog()
+        restartAttempts += 1
+        print("[KestrelBar] core failure: \(reason) (attempt \(restartAttempts)/\(maxRestartAttempts))")
+
+        if restartAttempts > maxRestartAttempts {
+            coreError = "Core process failed after \(maxRestartAttempts) restart attempts. Restart Kestrel manually."
+            aggregateLabel = "Error"
+            DispatchQueue.main.async { [weak self] in
+                self?.updateIcon()
+                self?.buildMenu()
+            }
+            return
+        }
+
+        coreError = "Core restarting (attempt \(restartAttempts)/\(maxRestartAttempts))..."
+        DispatchQueue.main.async { [weak self] in
+            self?.updateIcon()
+            self?.buildMenu()
+        }
+
+        let delay = min(backoffDelay, 30.0)
+        backoffDelay = min(backoffDelay * 2, 30.0)
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+            guard let self = self else { return }
+            self.coreProcess?.stop()
+            self.lastDataTimestamp = Date()
+            self.startCore()
+        }
     }
 
     private func findCoreBinary() -> String? {
@@ -623,6 +770,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let type = json["type"] as? String else { return }
 
+        lastDataTimestamp = Date()
+        if restartAttempts > 0 {
+            restartAttempts = 0
+            backoffDelay = 1.0
+            coreError = nil
+        }
+
         switch type {
         case "reading":
             guard let sensor = json["sensor"] as? String,
@@ -660,7 +814,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         DispatchQueue.main.async { [weak self] in
             self?.updateIcon()
-            self?.buildMenu()
+            self?.updateMenuInPlace()
         }
     }
 

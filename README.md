@@ -124,10 +124,12 @@ Faults are loaded from JSON config files with timed triggers and optional auto-c
 ## Menu Bar Features
 
 - **Live sensor display** with color-coded progress bars and state indicators
+- **Incremental menu updates** -- sensor data updates in-place without full menu rebuilds, eliminating flicker during rapid data events
 - **Sensor detail submenus** with diagnostic information:
   - **Why?** -- plain-language explanation of why the sensor is in its current state, varying by value range and sensor type
   - **Check** -- specific troubleshooting steps (which app to open, which tab to check, what to look for)
   - **Quick actions** -- clickable shortcuts to open Activity Monitor, Battery Settings, or Storage Settings directly
+- **Core process watchdog** -- monitors the core subprocess for crashes and stale data, automatically restarts with exponential backoff (up to 5 attempts)
 - **Sensor toggles** -- enable or disable individual sensors from Settings
 - **Resolution History** -- logs when sensors recover, with duration and timestamp (stored in `~/Library/Application Support/Kestrel/resolutions.jsonl`)
 - **Sensitivity presets** -- Relaxed (0.98) / Normal (0.95) / Strict (0.85) that restart the core with adjusted thresholds
@@ -164,10 +166,13 @@ cmake --build build
 ## Testing
 
 ```bash
-cd build && ctest --output-on-failure
+cd build && ctest --output-on-failure     # C++ tests (40)
+swift test --package-path macos-app       # Swift tests (36)
 ```
 
-35 tests covering measurement window, rule evaluation (including per-sensor threshold targeting and battery inversion), missing data detection, engine state machine, and fault injection with recovery.
+76 tests total:
+- **C++ (40)** -- measurement window, rule evaluation (threshold bounds maps, per-sensor targeting, battery inversion), missing data detection, engine state machine, and fault injection with recovery
+- **Swift (36)** -- SensorDiagnostics: diagnosis messages for all sensors/states/boundary values, troubleshooting tips, and action mappings
 
 ## Project Structure
 
@@ -181,6 +186,11 @@ kestrel/
     logging/          # JSONL structured output
     main.cpp          # CLI entry point
   macos-app/          # Swift menu bar UI (SPM project)
+    Sources/
+      KestrelBarLib/  # Testable library (SensorDiagnostics)
+      KestrelBar/     # Menu bar app (AppDelegate, CoreProcess, etc.)
+    Tests/
+      KestrelBarLibTests/  # Swift tests for SensorDiagnostics
   tests/
     unit/             # Unit tests for each component
     fault/            # Fault injection verification tests

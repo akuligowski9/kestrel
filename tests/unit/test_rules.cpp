@@ -146,6 +146,85 @@ TEST(ThresholdRule, BatteryLowTriggersDegraded) {
     EXPECT_EQ(result.severity, RuleSeverity::DEGRADED);
 }
 
+// --- ThresholdRule: Bounds Map ---
+
+TEST(ThresholdRule, BoundsMapMultipleSensors) {
+    MeasurementWindow window(8);
+    window.push(make_reading("cpu_load", 0.99));
+    window.push(make_reading("memory", 0.5));
+    window.push(make_reading("battery", 0.02));
+
+    ThresholdRule rule(std::unordered_map<std::string, ThresholdBounds>{
+        {"cpu_load", {0.0, 0.95, RuleSeverity::DEGRADED}},
+        {"memory",   {0.0, 0.95, RuleSeverity::DEGRADED}},
+        {"battery",  {0.05, 1.0, RuleSeverity::DEGRADED}},
+    });
+
+    auto cpu = rule.evaluate(window, "cpu_load");
+    EXPECT_EQ(cpu.severity, RuleSeverity::DEGRADED); // 0.99 > 0.95
+
+    auto mem = rule.evaluate(window, "memory");
+    EXPECT_EQ(mem.severity, RuleSeverity::OK); // 0.5 within [0, 0.95]
+
+    auto bat = rule.evaluate(window, "battery");
+    EXPECT_EQ(bat.severity, RuleSeverity::DEGRADED); // 0.02 < 0.05
+}
+
+TEST(ThresholdRule, BoundsMapUnknownSensorIsOK) {
+    MeasurementWindow window(8);
+    window.push(make_reading("temperature", 99.0));
+
+    ThresholdRule rule(std::unordered_map<std::string, ThresholdBounds>{
+        {"cpu_load", {0.0, 0.95, RuleSeverity::DEGRADED}},
+    });
+
+    auto result = rule.evaluate(window, "temperature");
+    EXPECT_EQ(result.severity, RuleSeverity::OK);
+}
+
+TEST(ThresholdRule, BoundsMapInvalidReadingReturnsFailed) {
+    MeasurementWindow window(8);
+    window.push(make_reading("cpu_load", 0.5, false));
+
+    ThresholdRule rule(std::unordered_map<std::string, ThresholdBounds>{
+        {"cpu_load", {0.0, 0.95, RuleSeverity::DEGRADED}},
+    });
+
+    auto result = rule.evaluate(window, "cpu_load");
+    EXPECT_EQ(result.severity, RuleSeverity::FAILED);
+}
+
+TEST(ThresholdRule, BoundsMapEmptyMapAllSensorsOK) {
+    MeasurementWindow window(8);
+    window.push(make_reading("cpu_load", 0.99));
+    window.push(make_reading("memory", 0.99));
+
+    ThresholdRule rule(std::unordered_map<std::string, ThresholdBounds>{});
+
+    auto cpu = rule.evaluate(window, "cpu_load");
+    EXPECT_EQ(cpu.severity, RuleSeverity::OK);
+
+    auto mem = rule.evaluate(window, "memory");
+    EXPECT_EQ(mem.severity, RuleSeverity::OK);
+}
+
+TEST(ThresholdRule, BoundsMapPerSensorSeverity) {
+    MeasurementWindow window(8);
+    window.push(make_reading("cpu_load", 0.99));
+    window.push(make_reading("battery", 0.01));
+
+    ThresholdRule rule(std::unordered_map<std::string, ThresholdBounds>{
+        {"cpu_load", {0.0, 0.95, RuleSeverity::DEGRADED}},
+        {"battery",  {0.05, 1.0, RuleSeverity::FAILED}},
+    });
+
+    auto cpu = rule.evaluate(window, "cpu_load");
+    EXPECT_EQ(cpu.severity, RuleSeverity::DEGRADED);
+
+    auto bat = rule.evaluate(window, "battery");
+    EXPECT_EQ(bat.severity, RuleSeverity::FAILED);
+}
+
 // --- MissingDataRule ---
 
 TEST(MissingDataRule, RecentReadingIsOK) {

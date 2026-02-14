@@ -8,6 +8,9 @@ class CoreProcess {
     private var outputPipe: Pipe?
 
     var onLine: ((String) -> Void)?
+    var onTermination: ((Int32) -> Void)?
+
+    var isRunning: Bool { process?.isRunning ?? false }
 
     init(binaryPath: String, faultConfigPath: String? = nil, threshold: Double = 0.95) {
         self.binaryPath = binaryPath
@@ -45,8 +48,9 @@ class CoreProcess {
             }
         }
 
-        process.terminationHandler = { [weak self] _ in
+        process.terminationHandler = { [weak self] proc in
             self?.outputPipe?.fileHandleForReading.readabilityHandler = nil
+            self?.onTermination?(proc.terminationStatus)
         }
 
         do {

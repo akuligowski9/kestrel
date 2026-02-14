@@ -70,18 +70,15 @@ int main(int argc, char* argv[]) {
     // Configure engine with rules
     Engine engine;
 
-    // High-value threshold for CPU, memory, storage (high usage = bad)
-    engine.add_rule(std::make_unique<ThresholdRule>(0.0, threshold,
-                    RuleSeverity::DEGRADED, "cpu_load"));
-    engine.add_rule(std::make_unique<ThresholdRule>(0.0, threshold,
-                    RuleSeverity::DEGRADED, "memory"));
-    engine.add_rule(std::make_unique<ThresholdRule>(0.0, threshold,
-                    RuleSeverity::DEGRADED, "storage"));
-
-    // Low-value threshold for battery (low charge = bad, full charge = good)
+    // Per-sensor thresholds: high usage = bad for CPU/memory/storage, low charge = bad for battery
     double battery_low = 1.0 - threshold; // 0.05 at Normal → alert below 5%
-    engine.add_rule(std::make_unique<ThresholdRule>(battery_low, 1.0,
-                    RuleSeverity::DEGRADED, "battery"));
+    engine.add_rule(std::make_unique<ThresholdRule>(
+        std::unordered_map<std::string, ThresholdBounds>{
+            {"cpu_load", {0.0, threshold, RuleSeverity::DEGRADED}},
+            {"memory",   {0.0, threshold, RuleSeverity::DEGRADED}},
+            {"storage",  {0.0, threshold, RuleSeverity::DEGRADED}},
+            {"battery",  {battery_low, 1.0, RuleSeverity::DEGRADED}},
+        }));
 
     engine.add_rule(std::make_unique<ImplausibleValueRule>(-1.0, 200.0));
     engine.add_rule(std::make_unique<RateOfChangeRule>(0.5));
