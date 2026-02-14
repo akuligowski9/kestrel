@@ -16,6 +16,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     // Settings
     private var currentSensitivity: String = "Normal"
+    private var disabledSensors: Set<String> = []
 
     struct SensorDisplayState {
         var value: Double = 0.0
@@ -90,6 +91,21 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // --- Sensor rows ---
         for sensor in sensorOrder {
             let info = sensorInfo[sensor]!
+
+            if disabledSensors.contains(sensor) {
+                let item = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+                item.attributedTitle = NSAttributedString(
+                    string: "\u{26AA}  \(info.label.padding(toLength: 10, withPad: " ", startingAt: 0))disabled",
+                    attributes: [
+                        .font: NSFont.systemFont(ofSize: 12),
+                        .foregroundColor: NSColor.tertiaryLabelColor,
+                    ]
+                )
+                item.isEnabled = false
+                menu.addItem(item)
+                continue
+            }
+
             let display = sensorStates[sensor]
             let value = display?.value ?? 0.0
             let state = display?.state ?? "—"
@@ -202,6 +218,38 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         settingsSub.addItem(NSMenuItem.separator())
 
+        // Sensor toggles
+        let sensorsHeader = NSMenuItem(title: "Sensors", action: nil, keyEquivalent: "")
+        sensorsHeader.isEnabled = false
+        sensorsHeader.attributedTitle = NSAttributedString(
+            string: "Sensors",
+            attributes: [
+                .font: NSFont.systemFont(ofSize: 11, weight: .semibold),
+                .foregroundColor: NSColor.secondaryLabelColor,
+            ]
+        )
+        settingsSub.addItem(sensorsHeader)
+
+        for sensor in sensorOrder {
+            let info = sensorInfo[sensor]!
+            let enabled = !disabledSensors.contains(sensor)
+            let check = enabled ? "\u{2713} " : "   "
+            let item = NSMenuItem(
+                title: "\(check)\(info.label)",
+                action: #selector(toggleSensor(_:)),
+                keyEquivalent: ""
+            )
+            item.target = self
+            item.representedObject = sensor
+            item.attributedTitle = NSAttributedString(
+                string: "\(check)\(info.label)",
+                attributes: [.font: NSFont.systemFont(ofSize: 12, weight: enabled ? .regular : .light)]
+            )
+            settingsSub.addItem(item)
+        }
+
+        settingsSub.addItem(NSMenuItem.separator())
+
         // Project link
         let linkItem = NSMenuItem(
             title: "About Kestrel...",
@@ -272,29 +320,224 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         menu.addItem(NSMenuItem.separator())
 
-        // Details
-        let details = [
-            ("Source", info.source),
-            ("Polling", "every \(info.poll)"),
-            ("Valid", valid ? "yes" : "no"),
-        ]
+        // "Why?" — label on its own, explanation below
+        let threshold = currentThreshold()
+        let diagnosis = sensorDiagnosis(sensor: sensor, state: state, value: value, valid: valid, pct: pct, threshold: threshold)
+        addInfoBlock(to: menu, label: "Why?", body: diagnosis, bodyColor: barColor)
 
-        for (label, detail) in details {
-            let item = NSMenuItem(title: "", action: nil, keyEquivalent: "")
-            let str = NSMutableAttributedString(
-                string: "\(label)  ",
-                attributes: [
-                    .font: NSFont.systemFont(ofSize: 11, weight: .medium),
-                    .foregroundColor: NSColor.secondaryLabelColor,
-                ]
+        // "Check" — troubleshooting tip below
+        let tip = sensorTroubleshootTip(sensor: sensor, state: state, pct: pct)
+        addInfoBlock(to: menu, label: "Check", body: tip, bodyColor: .labelColor)
+
+        // Clickable actions — always shown so people can jump to the right place
+        menu.addItem(NSMenuItem.separator())
+        for action in sensorActions(sensor: sensor, state: state, value: value, threshold: threshold) {
+            let actionItem = NSMenuItem(
+                title: action.title,
+                action: #selector(sensorActionClicked(_:)),
+                keyEquivalent: ""
             )
-            str.append(NSAttributedString(
-                string: detail,
-                attributes: [.font: NSFont.systemFont(ofSize: 11)]
-            ))
-            item.attributedTitle = str
-            item.isEnabled = false
-            menu.addItem(item)
+            actionItem.target = self
+            actionItem.representedObject = action.id
+            actionItem.attributedTitle = NSAttributedString(
+                string: "  \(action.title)",
+                attributes: [.font: NSFont.systemFont(ofSize: 12)]
+            )
+            menu.addItem(actionItem)
+        }
+
+        menu.addItem(NSMenuItem.separator())
+
+        // Compact metadata footer
+        let validStr = valid ? "valid" : "invalid"
+        let meta = "via \(info.source) · every \(info.poll) · \(validStr)"
+        let metaItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+        metaItem.attributedTitle = NSAttributedString(
+            string: "  \(meta)",
+            attributes: [
+                .font: NSFont.systemFont(ofSize: 10),
+                .foregroundColor: NSColor.tertiaryLabelColor,
+            ]
+        )
+        metaItem.isEnabled = false
+        menu.addItem(metaItem)
+    }
+
+    private func addInfoBlock(to menu: NSMenu, label: String, body: String, bodyColor: NSColor) {
+        let item = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+
+        let str = NSMutableAttributedString(
+            string: "  \(label)\n",
+            attributes: [
+                .font: NSFont.systemFont(ofSize: 10, weight: .semibold),
+                .foregroundColor: NSColor.tertiaryLabelColor,
+            ]
+        )
+        str.append(NSAttributedString(
+            string: "  \(body)",
+            attributes: [
+                .font: NSFont.systemFont(ofSize: 12),
+                .foregroundColor: bodyColor,
+            ]
+        ))
+
+        item.attributedTitle = str
+        item.isEnabled = false
+        menu.addItem(item)
+    }
+
+    private func sensorDiagnosis(sensor: String, state: String, value: Double, valid: Bool, pct: Int, threshold: Double) -> String {
+        if state == "UNKNOWN" {
+            return "Waiting for the first reading from this sensor."
+        }
+
+        if state == "FAILED" {
+            switch sensor {
+            case "cpu_load":
+                return "The CPU sensor stopped responding. This can happen briefly during heavy system load."
+            case "memory":
+                return "The memory sensor stopped responding. A restart usually resolves this."
+            case "battery":
+                return "The battery sensor isn't reporting data. This can happen if your Mac can't read battery hardware."
+            case "storage":
+                return "The disk sensor stopped responding. Check that your disk is accessible."
+            default:
+                return "This sensor stopped responding. Kestrel will recover when data resumes."
+            }
+        }
+
+        switch sensor {
+        case "cpu_load":
+            if state == "OK" {
+                if pct < 20 {
+                    return "Your Mac is using \(pct)% of its CPU. Mostly idle — running smoothly."
+                } else if pct < 50 {
+                    return "Your Mac is using \(pct)% of its CPU. Normal activity — nothing unusual."
+                } else {
+                    return "Your Mac is using \(pct)% of its CPU. Moderate load but still within healthy range."
+                }
+            } else {
+                return "Your Mac is using \(pct)% of its CPU. Something is pushing the processor hard. Check Activity Monitor to find which app is responsible."
+            }
+
+        case "memory":
+            if state == "OK" {
+                if pct < 50 {
+                    return "Your Mac is using \(pct)% of its memory. Plenty of room for apps to run."
+                } else {
+                    return "Your Mac is using \(pct)% of its memory. Healthy — still enough free for normal use."
+                }
+            } else {
+                return "Your Mac is using \(pct)% of its memory. Apps may slow down or swap to disk. Check Activity Monitor for memory-heavy apps."
+            }
+
+        case "battery":
+            if state == "OK" {
+                if pct > 80 {
+                    return "Battery is at \(pct)%. Fully healthy — no action needed."
+                } else if pct > 30 {
+                    return "Battery is at \(pct)%. Charge level is fine for normal use."
+                } else {
+                    return "Battery is at \(pct)%. Getting lower but still within healthy range. Consider plugging in soon."
+                }
+            } else {
+                return "Battery is critically low at \(pct)%. Your Mac may shut down soon — connect to power now."
+            }
+
+        case "storage":
+            if state == "OK" {
+                if pct < 50 {
+                    return "Your disk is \(pct)% full. Plenty of free space available."
+                } else {
+                    return "Your disk is \(pct)% full. Still enough room, but keep an eye on large files."
+                }
+            } else {
+                return "Your disk is \(pct)% full. Running low on space can cause slowdowns. Try emptying Trash or removing large unused files."
+            }
+
+        default:
+            if state == "OK" {
+                return "Sensor reading \(pct)% — operating normally."
+            } else {
+                return "Sensor reading \(pct)% — outside expected range. Check system settings."
+            }
+        }
+    }
+
+    private func sensorTroubleshootTip(sensor: String, state: String, pct: Int) -> String {
+        switch sensor {
+        case "cpu_load":
+            if state == "OK" {
+                return "Activity Monitor → CPU tab shows what's running and how much each app uses."
+            } else {
+                return "Activity Monitor → CPU tab → sort by % CPU to find the heavy app. You can quit it from there."
+            }
+
+        case "memory":
+            if state == "OK" {
+                return "Activity Monitor → Memory tab shows usage per app. The Memory Pressure graph at the bottom shows overall health."
+            } else {
+                return "Activity Monitor → Memory tab → sort by Memory. Close browser tabs and unused apps first — they're usually the biggest consumers."
+            }
+
+        case "battery":
+            if state == "OK" {
+                return "System Settings → Battery shows charge history and battery health. Look for apps using significant energy."
+            } else {
+                return "Plug in your charger now. System Settings → Battery shows which apps are draining power fastest."
+            }
+
+        case "storage":
+            if state == "OK" {
+                return "System Settings → General → Storage shows what's using disk space and offers cleanup recommendations."
+            } else {
+                return "System Settings → General → Storage to see what's using space. Quick wins: empty Trash, clear Downloads, delete old iOS backups."
+            }
+
+        default:
+            return "Check System Settings or Activity Monitor for details on this sensor."
+        }
+    }
+
+    private struct SensorAction {
+        let id: String
+        let title: String
+    }
+
+    private func sensorActions(sensor: String, state: String, value: Double, threshold: Double) -> [SensorAction] {
+        var actions: [SensorAction] = []
+
+        switch sensor {
+        case "cpu_load":
+            actions.append(SensorAction(id: "open_activity_monitor", title: "Open Activity Monitor"))
+        case "memory":
+            actions.append(SensorAction(id: "open_activity_monitor", title: "Open Activity Monitor"))
+        case "battery":
+            actions.append(SensorAction(id: "open_battery_settings", title: "Open Energy Settings"))
+        case "storage":
+            actions.append(SensorAction(id: "open_storage_settings", title: "Open Storage Settings"))
+        default:
+            break
+        }
+
+        return actions
+    }
+
+    @objc private func sensorActionClicked(_ sender: NSMenuItem) {
+        guard let actionId = sender.representedObject as? String else { return }
+
+        switch actionId {
+        case "open_activity_monitor":
+            NSWorkspace.shared.open(URL(fileURLWithPath: "/System/Applications/Utilities/Activity Monitor.app"))
+        case "open_battery_settings":
+            NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.battery")!)
+        case "open_storage_settings":
+            NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.settings.Storage")!)
+        case "adjust_sensitivity":
+            // Rebuild menu with settings focused — user can find it in Settings submenu
+            break
+        default:
+            break
         }
     }
 
@@ -343,6 +586,20 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         guard let label = sender.representedObject as? String else { return }
         currentSensitivity = label
         restartCore()
+        buildMenu()
+    }
+
+    @objc private func toggleSensor(_ sender: NSMenuItem) {
+        guard let sensor = sender.representedObject as? String else { return }
+        if disabledSensors.contains(sensor) {
+            disabledSensors.remove(sensor)
+        } else {
+            disabledSensors.insert(sensor)
+            sensorStates.removeValue(forKey: sensor)
+            degradedSince.removeValue(forKey: sensor)
+        }
+        recomputeAggregate()
+        updateIcon()
         buildMenu()
     }
 
@@ -532,13 +789,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func recomputeAggregate() {
-        if sensorStates.isEmpty {
+        let activeSensors = sensorStates.filter { !disabledSensors.contains($0.key) }
+
+        if activeSensors.isEmpty {
             aggregateLabel = "UNKNOWN"
             return
         }
 
         var notOkCount = 0
-        for (_, display) in sensorStates {
+        for (_, display) in activeSensors {
             if display.state != "OK" {
                 notOkCount += 1
             }

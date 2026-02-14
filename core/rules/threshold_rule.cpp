@@ -2,16 +2,24 @@
 
 namespace kestrel {
 
-ThresholdRule::ThresholdRule(double min, double max, RuleSeverity breach_severity)
-    : min_(min), max_(max), breach_severity_(breach_severity) {}
+ThresholdRule::ThresholdRule(double min, double max, RuleSeverity breach_severity,
+                             const std::string& target_sensor)
+    : min_(min), max_(max), breach_severity_(breach_severity),
+      target_sensor_(target_sensor) {}
 
 RuleResult ThresholdRule::evaluate(const MeasurementWindow& window,
                                    const std::string& sensor_id) {
-    auto latest = window.latest(sensor_id);
-
     RuleResult result;
     result.rule_name = name();
     result.sensor_id = sensor_id;
+
+    // Skip sensors this rule doesn't target
+    if (!target_sensor_.empty() && target_sensor_ != sensor_id) {
+        result.severity = RuleSeverity::OK;
+        return result;
+    }
+
+    auto latest = window.latest(sensor_id);
 
     if (!latest.valid) {
         result.severity = RuleSeverity::FAILED;

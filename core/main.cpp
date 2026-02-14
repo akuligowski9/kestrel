@@ -68,7 +68,20 @@ int main(int argc, char* argv[]) {
 
     // Configure engine with rules
     Engine engine;
-    engine.add_rule(std::make_unique<ThresholdRule>(0.0, threshold));
+
+    // High-value threshold for CPU, memory, storage (high usage = bad)
+    engine.add_rule(std::make_unique<ThresholdRule>(0.0, threshold,
+                    RuleSeverity::DEGRADED, "cpu_load"));
+    engine.add_rule(std::make_unique<ThresholdRule>(0.0, threshold,
+                    RuleSeverity::DEGRADED, "memory"));
+    engine.add_rule(std::make_unique<ThresholdRule>(0.0, threshold,
+                    RuleSeverity::DEGRADED, "storage"));
+
+    // Low-value threshold for battery (low charge = bad, full charge = good)
+    double battery_low = 1.0 - threshold; // 0.05 at Normal → alert below 5%
+    engine.add_rule(std::make_unique<ThresholdRule>(battery_low, 1.0,
+                    RuleSeverity::DEGRADED, "battery"));
+
     engine.add_rule(std::make_unique<ImplausibleValueRule>(-1.0, 200.0));
     engine.add_rule(std::make_unique<RateOfChangeRule>(0.5));
     engine.add_rule(std::make_unique<MissingDataRule>(5000ms, 15000ms));
