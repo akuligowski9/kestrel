@@ -13,6 +13,7 @@
 #include "sensors/mac/storage_sensor.h"
 #include "sensors/sensor_manager.h"
 
+#include <atomic>
 #include <chrono>
 #include <csignal>
 #include <cstring>
@@ -22,10 +23,10 @@
 using namespace kestrel;
 using namespace std::chrono_literals;
 
-static volatile sig_atomic_t running = 1;
+static std::atomic<bool> running{true};
 
 static void signal_handler(int) {
-    running = 0;
+    running.store(false, std::memory_order_relaxed);
 }
 
 static const char* fault_type_name(FaultType type) {
@@ -106,7 +107,7 @@ int main(int argc, char* argv[]) {
     auto start_time = std::chrono::steady_clock::now();
     size_t prev_transition_count = 0;
 
-    while (running) {
+    while (running.load(std::memory_order_relaxed)) {
         auto now = std::chrono::steady_clock::now();
         double elapsed_s = std::chrono::duration<double>(now - start_time).count();
 

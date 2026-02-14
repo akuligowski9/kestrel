@@ -65,15 +65,19 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Severity explanation
         let severityDesc: String
-        switch aggregateLabel {
-        case "Healthy":
-            severityDesc = "All sensors reporting within expected bounds."
-        case "Warning":
-            severityDesc = "One sensor is outside expected bounds or unresponsive."
-        case "Alert":
-            severityDesc = "Multiple sensors are outside expected bounds."
-        default:
-            severityDesc = "Waiting for sensor data..."
+        if let error = coreError {
+            severityDesc = error
+        } else {
+            switch aggregateLabel {
+            case "Healthy":
+                severityDesc = "All sensors reporting within expected bounds."
+            case "Warning":
+                severityDesc = "One sensor is outside expected bounds or unresponsive."
+            case "Alert":
+                severityDesc = "Multiple sensors are outside expected bounds."
+            default:
+                severityDesc = "Waiting for sensor data..."
+            }
         }
         let descItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
         descItem.attributedTitle = NSAttributedString(
@@ -322,16 +326,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         // "Why?" — label on its own, explanation below
         let threshold = currentThreshold()
-        let diagnosis = sensorDiagnosis(sensor: sensor, state: state, value: value, valid: valid, pct: pct, threshold: threshold)
+        let diagnosis = SensorDiagnostics.diagnosis(sensor: sensor, state: state, value: value, valid: valid, pct: pct, threshold: threshold)
         addInfoBlock(to: menu, label: "Why?", body: diagnosis, bodyColor: barColor)
 
         // "Check" — troubleshooting tip below
-        let tip = sensorTroubleshootTip(sensor: sensor, state: state, pct: pct)
+        let tip = SensorDiagnostics.troubleshootTip(sensor: sensor, state: state)
         addInfoBlock(to: menu, label: "Check", body: tip, bodyColor: .labelColor)
 
         // Clickable actions — always shown so people can jump to the right place
         menu.addItem(NSMenuItem.separator())
-        for action in sensorActions(sensor: sensor, state: state, value: value, threshold: threshold) {
+        for action in SensorDiagnostics.actions(sensor: sensor) {
             let actionItem = NSMenuItem(
                 title: action.title,
                 action: #selector(sensorActionClicked(_:)),
@@ -386,159 +390,24 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(item)
     }
 
-    private func sensorDiagnosis(sensor: String, state: String, value: Double, valid: Bool, pct: Int, threshold: Double) -> String {
-        if state == "UNKNOWN" {
-            return "Waiting for the first reading from this sensor."
-        }
-
-        if state == "FAILED" {
-            switch sensor {
-            case "cpu_load":
-                return "The CPU sensor stopped responding. This can happen briefly during heavy system load."
-            case "memory":
-                return "The memory sensor stopped responding. A restart usually resolves this."
-            case "battery":
-                return "The battery sensor isn't reporting data. This can happen if your Mac can't read battery hardware."
-            case "storage":
-                return "The disk sensor stopped responding. Check that your disk is accessible."
-            default:
-                return "This sensor stopped responding. Kestrel will recover when data resumes."
-            }
-        }
-
-        switch sensor {
-        case "cpu_load":
-            if state == "OK" {
-                if pct < 20 {
-                    return "Your Mac is using \(pct)% of its CPU. Mostly idle — running smoothly."
-                } else if pct < 50 {
-                    return "Your Mac is using \(pct)% of its CPU. Normal activity — nothing unusual."
-                } else {
-                    return "Your Mac is using \(pct)% of its CPU. Moderate load but still within healthy range."
-                }
-            } else {
-                return "Your Mac is using \(pct)% of its CPU. Something is pushing the processor hard. Check Activity Monitor to find which app is responsible."
-            }
-
-        case "memory":
-            if state == "OK" {
-                if pct < 50 {
-                    return "Your Mac is using \(pct)% of its memory. Plenty of room for apps to run."
-                } else {
-                    return "Your Mac is using \(pct)% of its memory. Healthy — still enough free for normal use."
-                }
-            } else {
-                return "Your Mac is using \(pct)% of its memory. Apps may slow down or swap to disk. Check Activity Monitor for memory-heavy apps."
-            }
-
-        case "battery":
-            if state == "OK" {
-                if pct > 80 {
-                    return "Battery is at \(pct)%. Fully healthy — no action needed."
-                } else if pct > 30 {
-                    return "Battery is at \(pct)%. Charge level is fine for normal use."
-                } else {
-                    return "Battery is at \(pct)%. Getting lower but still within healthy range. Consider plugging in soon."
-                }
-            } else {
-                return "Battery is critically low at \(pct)%. Your Mac may shut down soon — connect to power now."
-            }
-
-        case "storage":
-            if state == "OK" {
-                if pct < 50 {
-                    return "Your disk is \(pct)% full. Plenty of free space available."
-                } else {
-                    return "Your disk is \(pct)% full. Still enough room, but keep an eye on large files."
-                }
-            } else {
-                return "Your disk is \(pct)% full. Running low on space can cause slowdowns. Try emptying Trash or removing large unused files."
-            }
-
-        default:
-            if state == "OK" {
-                return "Sensor reading \(pct)% — operating normally."
-            } else {
-                return "Sensor reading \(pct)% — outside expected range. Check system settings."
-            }
-        }
-    }
-
-    private func sensorTroubleshootTip(sensor: String, state: String, pct: Int) -> String {
-        switch sensor {
-        case "cpu_load":
-            if state == "OK" {
-                return "Activity Monitor → CPU tab shows what's running and how much each app uses."
-            } else {
-                return "Activity Monitor → CPU tab → sort by % CPU to find the heavy app. You can quit it from there."
-            }
-
-        case "memory":
-            if state == "OK" {
-                return "Activity Monitor → Memory tab shows usage per app. The Memory Pressure graph at the bottom shows overall health."
-            } else {
-                return "Activity Monitor → Memory tab → sort by Memory. Close browser tabs and unused apps first — they're usually the biggest consumers."
-            }
-
-        case "battery":
-            if state == "OK" {
-                return "System Settings → Battery shows charge history and battery health. Look for apps using significant energy."
-            } else {
-                return "Plug in your charger now. System Settings → Battery shows which apps are draining power fastest."
-            }
-
-        case "storage":
-            if state == "OK" {
-                return "System Settings → General → Storage shows what's using disk space and offers cleanup recommendations."
-            } else {
-                return "System Settings → General → Storage to see what's using space. Quick wins: empty Trash, clear Downloads, delete old iOS backups."
-            }
-
-        default:
-            return "Check System Settings or Activity Monitor for details on this sensor."
-        }
-    }
-
-    private struct SensorAction {
-        let id: String
-        let title: String
-    }
-
-    private func sensorActions(sensor: String, state: String, value: Double, threshold: Double) -> [SensorAction] {
-        var actions: [SensorAction] = []
-
-        switch sensor {
-        case "cpu_load":
-            actions.append(SensorAction(id: "open_activity_monitor", title: "Open Activity Monitor"))
-        case "memory":
-            actions.append(SensorAction(id: "open_activity_monitor", title: "Open Activity Monitor"))
-        case "battery":
-            actions.append(SensorAction(id: "open_battery_settings", title: "Open Energy Settings"))
-        case "storage":
-            actions.append(SensorAction(id: "open_storage_settings", title: "Open Storage Settings"))
-        default:
-            break
-        }
-
-        return actions
-    }
-
     @objc private func sensorActionClicked(_ sender: NSMenuItem) {
         guard let actionId = sender.representedObject as? String else { return }
 
         switch actionId {
         case "open_activity_monitor":
-            NSWorkspace.shared.open(URL(fileURLWithPath: "/System/Applications/Utilities/Activity Monitor.app"))
+            openAppByBundleId("com.apple.ActivityMonitor")
         case "open_battery_settings":
             NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.battery")!)
         case "open_storage_settings":
             NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.settings.Storage")!)
-        case "adjust_sensitivity":
-            // Rebuild menu with settings focused — user can find it in Settings submenu
-            break
         default:
             break
         }
+    }
+
+    private func openAppByBundleId(_ bundleId: String) {
+        guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleId) else { return }
+        NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration())
     }
 
     // MARK: - Sensor Row
@@ -611,10 +480,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func statusDot(for state: String) -> String {
         switch state {
-        case "OK", "Healthy":       return "\u{1F7E2}"
-        case "DEGRADED", "Warning": return "\u{1F7E1}"
-        case "FAILED", "Alert":     return "\u{1F534}"
-        default:                    return "\u{26AA}"
+        case "OK", "Healthy":        return "\u{1F7E2}"
+        case "DEGRADED", "Warning":  return "\u{1F7E1}"
+        case "FAILED", "Alert":      return "\u{1F534}"
+        case "Error":                return "\u{1F534}"
+        default:                     return "\u{26AA}"
         }
     }
 
@@ -676,11 +546,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - Core Process
 
+    private var coreError: String? = nil
+
     private func startCore() {
         guard let path = findCoreBinary() else {
             print("[KestrelBar] could not find kestrel binary")
+            coreError = "Core binary not found. Reinstall Kestrel or check build."
+            aggregateLabel = "Error"
+            buildMenu()
             return
         }
+        coreError = nil
 
         let args = ProcessInfo.processInfo.arguments
         var faultPath: String? = nil
