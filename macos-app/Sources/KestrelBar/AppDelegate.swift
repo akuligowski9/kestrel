@@ -1,6 +1,7 @@
 import AppKit
 import KestrelBarLib
 import ServiceManagement
+import UserNotifications
 
 class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
@@ -58,6 +59,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         updateIcon()
         buildMenu()
         startCore()
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert]) { _, _ in }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -317,6 +319,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         settingsItem.submenu = settingsSub
         menu.addItem(settingsItem)
+
+        // --- Export ---
+        let exportItem = NSMenuItem(title: "Export Session Log...", action: #selector(exportLog), keyEquivalent: "e")
+        exportItem.target = self
+        menu.addItem(exportItem)
 
         menu.addItem(NSMenuItem.separator())
         menu.addItem(NSMenuItem(title: "Quit Kestrel", action: #selector(quit), keyEquivalent: "q"))
@@ -608,6 +615,42 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    private func sendNotification(sensor: String, from: String, to: String) {
+        let label = sensorInfo[sensor]?.label ?? sensor
+        let content = UNMutableNotificationContent()
+        content.title = "Kestrel: \(label) \(to)"
+        content.body = "\(label) changed from \(from) to \(to)."
+
+        let request = UNNotificationRequest(
+            identifier: "kestrel-\(sensor)-\(Date().timeIntervalSince1970)",
+            content: content,
+            trigger: nil
+        )
+        UNUserNotificationCenter.current().add(request)
+    }
+
+    @objc private func exportLog() {
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = "kestrel-session.jsonl"
+        panel.allowedContentTypes = [.json]
+
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+
+        let lines = sensorStates.compactMap { sensor, state -> String? in
+            guard let data = try? JSONSerialization.data(withJSONObject: [
+                "sensor": sensor,
+                "value": state.value,
+                "state": state.state,
+                "valid": state.valid,
+                "exported": ISO8601DateFormatter().string(from: Date()),
+            ]) else { return nil }
+            return String(data: data, encoding: .utf8)
+        }
+
+        let output = lines.joined(separator: "\n") + "\n"
+        try? output.write(to: url, atomically: true, encoding: .utf8)
+    }
+
     // MARK: - Icon
 
     private func updateIcon() {
@@ -830,6 +873,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             var display = sensorStates[sensor] ?? SensorDisplayState()
             display.state = to
             sensorStates[sensor] = display
+
+            // Notify on state changes
+            sendNotification(sensor: sensor, from: from, to: to)
 
             // Track resolution timing
             if to != "OK" && degradedSince[sensor] == nil {
