@@ -1,0 +1,30 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  cpp-tests:
+    name: C++ Tests
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: brew install cmake ninja
+      - name: Build
+        run: cmake -B build -G Ninja && cmake --build build
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+  swift-tests:
+    name: Swift Tests
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        run: swift build --package-path macos-app
+      - name: Test
+        run: swift test --package-path macos-app
