@@ -1,5 +1,6 @@
 import AppKit
 import KestrelBarLib
+import ServiceManagement
 
 class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
@@ -273,6 +274,23 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             )
             settingsSub.addItem(item)
         }
+
+        settingsSub.addItem(NSMenuItem.separator())
+
+        // Launch at Login
+        let launchAtLogin = SMAppService.mainApp.status == .enabled
+        let launchCheck = launchAtLogin ? "\u{2713} " : "   "
+        let launchItem = NSMenuItem(
+            title: "\(launchCheck)Launch at Login",
+            action: #selector(toggleLaunchAtLogin),
+            keyEquivalent: ""
+        )
+        launchItem.target = self
+        launchItem.attributedTitle = NSAttributedString(
+            string: "\(launchCheck)Launch at Login",
+            attributes: [.font: NSFont.systemFont(ofSize: 12, weight: launchAtLogin ? .semibold : .regular)]
+        )
+        settingsSub.addItem(launchItem)
 
         settingsSub.addItem(NSMenuItem.separator())
 
@@ -558,6 +576,19 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
         recomputeAggregate()
         updateIcon()
+        buildMenu()
+    }
+
+    @objc private func toggleLaunchAtLogin() {
+        do {
+            if SMAppService.mainApp.status == .enabled {
+                try SMAppService.mainApp.unregister()
+            } else {
+                try SMAppService.mainApp.register()
+            }
+        } catch {
+            print("[KestrelBar] launch at login toggle failed: \(error)")
+        }
         buildMenu()
     }
 
