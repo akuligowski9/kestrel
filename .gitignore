@@ -1,5 +1,6 @@
 build/
 .build/
+Testing/
 *.jsonl
 .DS_Store
 .cache/
