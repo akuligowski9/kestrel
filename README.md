@@ -1,5 +1,7 @@
 # Kestrel
 
+[\![CodeRabbit Reviews](https://img.shields.io/coderabbit/prs/github/akuligowski9/kestrel?labelColor=171717&color=FF570A&label=CodeRabbit+Reviews)](https://coderabbit.ai)
+
 **A C++ embedded-style system monitor that watches system behavior and signals when conditions deviate from expected bounds.**
 
 <p align="center">
